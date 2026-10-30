@@ -1,586 +1,141 @@
 import re
 from datetime import datetime
 from html import escape
-
 from playwright.sync_api import sync_playwright
 
-
-URL = "https://sowefund.com/investir"
-
-FISCAL_TAGS = {
-    "JEI",
-    "JEIR",
-    "JEII",
-    "IR PME",
-    "IR-PME",
-    "IR 2026",
-}
-
-OTHER_TAGS = {
-    "PEA",
-    "PEA-PME",
-    "150 0 B Ter",
-}
-
-STAGES = {
-    "Seed",
-    "SerieA",
-    "PreSerieA",
-}
+SOWEFUND_URL = 'https://sowefund.com/investir'
+WISEED_URL = 'https://www.wiseed.com/projets/crowdfunding?statuts=EN_FINANCEMENT'
+FISCAL_WORDS = ('JEI', 'JEIR', 'JEII', 'IR PME', 'IR-PME', 'IR 2026', 'REDUCTION IR', 'RÉDUCTION IR')
+STAGES = {'Seed', 'SerieA', 'PreSerieA'}
 
 
 def clean_lines(text):
-    """Nettoie les lignes extraites de la page."""
-
-    lines = []
-
-    for raw_line in text.splitlines():
-        line = " ".join(raw_line.split()).strip()
-
-        if line:
-            lines.append(line)
-
-    return lines
+    return [' '.join(x.split()).strip() for x in text.splitlines() if ' '.join(x.split()).strip()]
 
 
-def detect_title(sector, description):
-    """Essaie de retrouver le nom de la société dans la description."""
-
-    upper_description = description.upper()
-
-    if upper_description.startswith("ANYOS"):
-        return "ANYOS"
-
-    if "CIRCUL" in upper_description and "EGG" in upper_description:
-        return "Circul'egg"
-
-    if upper_description.startswith("KEPPLAIR"):
-        return "KEPPLAIR 72"
-
-    if "NOTPARK" in upper_description:
-        return "Notpark"
-
-    if "TÉLÉPÉAGE DU STATIONNEMENT" in upper_description:
-        return "Notpark"
-
-    if "GAMBAS FRANÇAISES" in upper_description:
-        return "Agriloops"
-
-    if "CHOCOLAT" in upper_description:
-        return "Le Chocolat des Français"
-
-    if "WIND FISHER" in upper_description:
-        return "Wind Fisher"
-
-    if "LIMOVA" in upper_description:
-        return "LIMOVA.ai"
-
-    # Certaines descriptions commencent par le nom suivi de deux-points.
-    if ":" in description:
-        possible_name = description.split(":", 1)[0].strip()
-
-        if 2 <= len(possible_name) <= 50:
-            return possible_name
-
-    fallback_titles = {
-        "Medtech": "Diagnostic intestinal par capsule",
-        "Services": "Solution numérique B2B",
-        "Énergie": "Production d'énergie innovante",
-        "Agroalimentaire": "Entreprise agroalimentaire",
-        "Technologie": "Entreprise technologique",
-        "Industrie": "Entreprise industrielle",
-        "Économie circulaire": "Entreprise d'économie circulaire",
-    }
-
-    return fallback_titles.get(sector, sector)
+def title_from_description(sector, description):
+    upper = description.upper()
+    known = {'ANYOS': 'ANYOS', 'CIRCUL': "Circul'egg", 'KEPPLAIR': 'KEPPLAIR 72', 'NOTPARK': 'Notpark',
+             'GAMBAS FRANÇAISES': 'Agriloops', 'CHOCOLAT': 'Le Chocolat des Français',
+             'WIND FISHER': 'Wind Fisher', 'LIMOVA': 'LIMOVA.ai'}
+    for needle, title in known.items():
+        if needle in upper:
+            return title
+    if ':' in description:
+        candidate = description.split(':', 1)[0].strip()
+        if 2 <= len(candidate) <= 50:
+            return candidate
+    return sector
 
 
-def parse_campaigns(lines):
-    """
-    Détecte les campagnes selon la structure visible sur Sowefund :
-
-    pourcentage
-    secteur
-    stade
-    montant
-    statut
-    description
-    dispositifs fiscaux
-    """
-
-    campaigns = []
-    index = 0
-
-    percentage_pattern = re.compile(r"^\d{1,3}%$")
-
-    amount_pattern = re.compile(
-        r"^[\d\s\u202f]+(?:,\d{2})?\s*€$"
-    )
-
-    while index < len(lines):
-        current_line = lines[index]
-
-        if not percentage_pattern.match(current_line):
-            index += 1
+def parse_sowefund(text):
+    lines = clean_lines(text)
+    pct = re.compile(r'^\d{1,3}%$')
+    amount = re.compile(r'^[\d\s\u202f]+(?:,\d{2})?\s*€$')
+    campaigns, i = [], 0
+    while i + 5 < len(lines):
+        if not pct.match(lines[i]):
+            i += 1
             continue
-
-        if index + 5 >= len(lines):
-            break
-
-        percentage = lines[index]
-        sector = lines[index + 1]
-        stage = lines[index + 2]
-        amount = lines[index + 3]
-        status = lines[index + 4]
-        description = lines[index + 5]
-
-        # Vérifie qu'il s'agit vraiment du début d'une campagne.
-        if stage not in STAGES:
-            index += 1
+        percentage, sector, stage, money, status, description = lines[i:i + 6]
+        if stage not in STAGES or not amount.match(money) or status.lower() != 'campagne en cours':
+            i += 1
             continue
-
-        if not amount_pattern.match(amount):
-            index += 1
-            continue
-
-        if status.lower() != "campagne en cours":
-            index += 1
-            continue
-
-        fiscal_tags = []
-        other_tags = []
-
-        cursor = index + 6
-
-        while cursor < len(lines):
-            candidate = lines[cursor]
-
-            # Le pourcentage suivant correspond à la campagne suivante.
-            if percentage_pattern.match(candidate):
-                break
-
-            # Fin de la section des campagnes ouvertes.
-            if candidate.startswith("+150 sociétés"):
-                break
-
-            if candidate in FISCAL_TAGS:
-                fiscal_tags.append(candidate)
-
-            if candidate in OTHER_TAGS:
-                other_tags.append(candidate)
-
-            cursor += 1
-
-        campaign = {
-            "title": detect_title(sector, description),
-            "percentage": percentage,
-            "sector": sector,
-            "stage": stage,
-            "amount": amount,
-            "status": status,
-            "description": description,
-            "fiscal": list(dict.fromkeys(fiscal_tags)),
-            "envelopes": list(dict.fromkeys(other_tags)),
-        }
-
-        campaigns.append(campaign)
-        index = cursor
-
+        tags, envelopes, j = [], [], i + 6
+        while j < len(lines) and not pct.match(lines[j]) and not lines[j].startswith('+150 sociétés'):
+            value = lines[j]
+            if any(word in value.upper() for word in FISCAL_WORDS):
+                tags.append(value)
+            if value.upper() in {'PEA', 'PEA-PME', '150 0 B TER'}:
+                envelopes.append(value)
+            j += 1
+        campaigns.append({'platform': 'Sowefund', 'title': title_from_description(sector, description),
+            'sector': sector, 'description': description, 'amount': money, 'status': status,
+            'detail': f'{stage} - {percentage}', 'tax': list(dict.fromkeys(tags)),
+            'envelopes': list(dict.fromkeys(envelopes)), 'url': SOWEFUND_URL})
+        i = j
     return campaigns
 
 
-def fiscal_priority(campaign):
-    """Classe les campagnes selon l'intérêt fiscal apparent."""
+def parse_wiseed(text):
+    lines = clean_lines(text)
+    start = next((i for i, x in enumerate(lines) if re.match(r'^\d+ projets? trouv', x, re.I)), 0)
+    end = next((i for i, x in enumerate(lines[start:], start) if re.match(r'^Page \d+ sur', x, re.I)), len(lines))
+    lines = lines[start:end]
+    statuses = {'Collecte en cours', 'Clôture en cours'}
+    indices = [i for i, x in enumerate(lines) if x in statuses]
+    campaigns = []
+    for pos, i in enumerate(indices):
+        j = indices[pos + 1] if pos + 1 < len(indices) else len(lines)
+        block = lines[i:j]
+        if len(block) < 4:
+            continue
+        title = block[1]
+        amount_idx = next((k for k, x in enumerate(block) if re.match(r'^€[\d,.\s]+$', x)), None)
+        money = block[amount_idx] if amount_idx is not None else 'Non détecté'
+        description_end = amount_idx if amount_idx is not None else len(block)
+        description = ' '.join(block[2:description_end]).strip()
+        tail = block[(amount_idx + 1 if amount_idx is not None else description_end):]
+        advantages = [x for x in block if any(w in x.upper() for w in ('IR', 'PEA', 'DÉFISCALISATION', 'DEFISCALISATION'))]
+        detail = ' - '.join(x for x in tail if any(w in x.lower() for w in ('horizon', 'rendement', 'ans', 'mois')))
+        campaigns.append({'platform': 'WiSEED', 'title': title, 'sector': 'À vérifier sur la fiche',
+            'description': description, 'amount': money, 'status': block[0],
+            'detail': detail or 'Projet en financement', 'tax': list(dict.fromkeys(advantages)),
+            'envelopes': [], 'url': WISEED_URL})
+    return campaigns
 
-    tags = set(campaign["fiscal"])
 
-    if "JEIR" in tags or "JEII" in tags:
-        return 1
-
-    if "JEI" in tags:
-        return 2
-
-    if "IR PME" in tags or "IR-PME" in tags:
-        return 3
-
-    if "IR 2026" in tags:
-        return 4
-
-    return 5
+def fetch_page(browser, url, name):
+    page = browser.new_page(viewport={'width': 1440, 'height': 1600}, locale='fr-FR')
+    page.goto(url, wait_until='domcontentloaded', timeout=90000)
+    page.wait_for_timeout(8000)
+    text = page.locator('body').inner_text()
+    page.screenshot(path=f'{name}-page.png', full_page=True)
+    with open(f'{name}-texte.txt', 'w', encoding='utf-8') as handle:
+        handle.write(text)
+    page.close()
+    return text
 
 
-def create_badges(values, css_class):
-    """Crée les badges HTML."""
-
-    return "".join(
-        f'<span class="badge {css_class}">{escape(value)}</span>'
-        for value in values
-    )
+def badges(values, css):
+    return ''.join(f'<span class="badge {css}">{escape(v)}</span>' for v in values)
 
 
 def create_report(campaigns):
-    """Génère le rapport HTML final."""
-
-    now = datetime.now().strftime("%d/%m/%Y à %H:%M")
-
-    fiscal_campaigns = [
-        campaign
-        for campaign in campaigns
-        if campaign["fiscal"]
-    ]
-
-    fiscal_campaigns.sort(
-        key=lambda campaign: (
-            fiscal_priority(campaign),
-            campaign["title"].lower(),
-        )
-    )
-
-    cards = ""
-
-    for campaign in fiscal_campaigns:
-        fiscal_badges = create_badges(
-            campaign["fiscal"],
-            "fiscal",
-        )
-
-        envelope_badges = create_badges(
-            campaign["envelopes"],
-            "envelope",
-        )
-
-        cards += f"""
-        <article class="card">
-            <div class="card-header">
-                <div>
-                    <h2>{escape(campaign["title"])}</h2>
-
-                    <p class="subtitle">
-                        {escape(campaign["sector"])}
-                        · {escape(campaign["stage"])}
-                    </p>
-                </div>
-
-                <span class="progress">
-                    {escape(campaign["percentage"])}
-                </span>
-            </div>
-
-            <div class="badges">
-                {fiscal_badges}
-                {envelope_badges}
-            </div>
-
-            <div class="information">
-                <div>
-                    <span class="label">Montant affiché</span>
-                    <strong>{escape(campaign["amount"])}</strong>
-                </div>
-
-                <div>
-                    <span class="label">Statut</span>
-                    <strong>{escape(campaign["status"])}</strong>
-                </div>
-            </div>
-
-            <p class="description">
-                {escape(campaign["description"])}
-            </p>
-        </article>
-        """
-
-    if not cards:
-        cards = """
-        <article class="card warning">
-            <h2>Aucune campagne fiscale détectée</h2>
-
-            <p>
-                La page a été chargée, mais aucune campagne contenant
-                JEI, JEIR, JEII, IR PME ou IR 2026 n'a été identifiée.
-            </p>
-        </article>
-        """
-
-    return f"""<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="utf-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1"
-    >
-
-    <title>Veille des investissements innovants</title>
-
-    <style>
-        * {{
-            box-sizing: border-box;
-        }}
-
-        body {{
-            margin: 0;
-            padding: 30px 18px;
-            background: #f3f6f9;
-            color: #17202a;
-            font-family: Arial, sans-serif;
-        }}
-
-        main {{
-            max-width: 1000px;
-            margin: auto;
-        }}
-
-        header {{
-            padding: 28px;
-            margin-bottom: 24px;
-            color: white;
-            background: #053f52;
-            border-radius: 14px;
-        }}
-
-        header h1 {{
-            margin: 0 0 12px;
-        }}
-
-        header p {{
-            margin: 6px 0;
-        }}
-
-        .summary {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-top: 18px;
-        }}
-
-        .summary span {{
-            padding: 8px 12px;
-            background: rgba(255, 255, 255, 0.16);
-            border-radius: 18px;
-        }}
-
-        .card {{
-            padding: 23px;
-            margin-bottom: 18px;
-            background: white;
-            border-left: 6px solid #00af8a;
-            border-radius: 12px;
-            box-shadow: 0 3px 12px rgba(25, 42, 60, 0.08);
-        }}
-
-        .warning {{
-            border-left-color: #e58e26;
-        }}
-
-        .card-header {{
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 20px;
-        }}
-
-        h2 {{
-            margin: 0;
-            color: #053f52;
-        }}
-
-        .subtitle {{
-            margin: 6px 0 0;
-            color: #64748b;
-        }}
-
-        .progress {{
-            min-width: 60px;
-            padding: 9px;
-            color: white;
-            text-align: center;
-            font-weight: bold;
-            background: #00af8a;
-            border-radius: 18px;
-        }}
-
-        .badges {{
-            margin: 18px 0;
-        }}
-
-        .badge {{
-            display: inline-block;
-            padding: 6px 10px;
-            margin: 3px 4px 3px 0;
-            border-radius: 15px;
-            font-size: 13px;
-            font-weight: bold;
-        }}
-
-        .fiscal {{
-            color: white;
-            background: #087f5b;
-        }}
-
-        .envelope {{
-            color: #253858;
-            background: #e4ebf5;
-        }}
-
-        .information {{
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-            margin: 16px 0;
-        }}
-
-        .information div {{
-            padding: 12px;
-            background: #f5f8fa;
-            border-radius: 8px;
-        }}
-
-        .label {{
-            display: block;
-            margin-bottom: 5px;
-            color: #64748b;
-            font-size: 12px;
-            text-transform: uppercase;
-        }}
-
-        .description {{
-            margin-bottom: 0;
-            line-height: 1.55;
-        }}
-
-        footer {{
-            padding: 20px;
-            color: #64748b;
-            font-size: 13px;
-            line-height: 1.5;
-        }}
-
-        @media (max-width: 600px) {{
-            .information {{
-                grid-template-columns: 1fr;
-            }}
-        }}
-    </style>
-</head>
-
-<body>
-<main>
-    <header>
-        <h1>Veille des investissements innovants</h1>
-
-        <p>Mise à jour : {escape(now)}</p>
-
-        <div class="summary">
-            <span>{len(campaigns)} campagnes en cours détectées</span>
-
-            <span>
-                {len(fiscal_campaigns)}
-                avec dispositif fiscal
-            </span>
-        </div>
-    </header>
-
-    {cards}
-
-    <footer>
-        <p>
-            Source analysée : Sowefund,
-            page « Investissements du moment ».
-        </p>
-
-        <p>
-            Les montants et pourcentages sont ceux affichés par la
-            plateforme. Ils ne constituent ni une valorisation,
-            ni une recommandation d'investissement.
-        </p>
-
-        <p>
-            La mention JEI, JEIR, JEII, IR PME ou IR 2026 doit être
-            vérifiée dans la documentation de chaque opération avant
-            toute souscription. L'investissement non coté comporte
-            notamment des risques de perte en capital et d'illiquidité.
-        </p>
-    </footer>
-</main>
-</body>
-</html>
-"""
+    now = datetime.now().strftime('%d/%m/%Y à %H:%M')
+    sections = []
+    for platform in ('Sowefund', 'WiSEED'):
+        items = [c for c in campaigns if c['platform'] == platform]
+        cards = []
+        for c in items:
+            tax = badges(c['tax'], 'tax') or '<span class="badge neutral">Fiscalité à vérifier</span>'
+            env = badges(c['envelopes'], 'env')
+            cards.append(f'''<article class="card"><h3>{escape(c['title'])}</h3>
+<p class="sub">{escape(c['sector'])} - {escape(c['detail'])}</p><div>{tax}{env}</div>
+<div class="grid"><div><small>Montant affiché</small><b>{escape(c['amount'])}</b></div>
+<div><small>Statut</small><b>{escape(c['status'])}</b></div></div>
+<p>{escape(c['description'])}</p><a href="{escape(c['url'])}" target="_blank" rel="noopener">Voir les projets sur {platform}</a></article>''')
+        content = ''.join(cards) or '<p>Aucun projet détecté.</p>'
+        sections.append(f'<section><h2>{platform} <span>{len(items)} projet(s)</span></h2>{content}</section>')
+    return f'''<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veille investissements innovants</title>
+<style>body{{margin:0;background:#f3f6f9;color:#17202a;font:15px Arial}}main{{max-width:1050px;margin:auto;padding:28px}}header{{background:#053f52;color:white;padding:26px;border-radius:14px}}section h2{{margin-top:30px;color:#053f52}}section h2 span{{font-size:14px;color:#64748b}}.card{{background:white;border-left:5px solid #00af8a;border-radius:10px;padding:20px;margin:14px 0;box-shadow:0 3px 12px #00000012}}h3{{margin:0;color:#053f52}}.sub{{color:#64748b}}.badge{{display:inline-block;padding:6px 9px;border-radius:14px;margin:3px;font-size:12px;font-weight:bold}}.tax{{background:#087f5b;color:white}}.env{{background:#e4ebf5}}.neutral{{background:#fff3cd;color:#664d03}}.grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}}.grid div{{background:#f5f8fa;padding:11px;border-radius:8px}}small,b{{display:block}}a{{color:#0563c1}}footer{{color:#64748b;padding:20px 0;line-height:1.5}}@media(max-width:600px){{.grid{{grid-template-columns:1fr}}}}</style></head>
+<body><main><header><h1>Veille des investissements innovants</h1><p>Mise à jour : {escape(now)}</p><p>{len(campaigns)} campagne(s) détectée(s) sur 2 plateformes</p></header>{''.join(sections)}<footer>Les mentions fiscales doivent être vérifiées dans la documentation de chaque opération. L'investissement non coté présente des risques de perte en capital et d'illiquidité.</footer></main></body></html>'''
 
 
 def main():
-    print(f"Chargement de {URL}")
-
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-
-        page = browser.new_page(
-            viewport={
-                "width": 1440,
-                "height": 1600,
-            },
-            locale="fr-FR",
-        )
-
-        page.goto(
-            URL,
-            wait_until="domcontentloaded",
-            timeout=90000,
-        )
-
-        # Attente du chargement des campagnes en JavaScript.
-        page.wait_for_timeout(8000)
-
-        body_text = page.locator("body").inner_text()
-
-        page.screenshot(
-            path="sowefund-page.png",
-            full_page=True,
-        )
-
+        sowefund_text = fetch_page(browser, SOWEFUND_URL, 'sowefund')
+        wiseed_text = fetch_page(browser, WISEED_URL, 'wiseed')
         browser.close()
-
-    # Sauvegarde du texte brut pour faciliter les diagnostics.
-    with open(
-        "sowefund-texte.txt",
-        "w",
-        encoding="utf-8",
-    ) as file:
-        file.write(body_text)
-
-    lines = clean_lines(body_text)
-    campaigns = parse_campaigns(lines)
-
-    report = create_report(campaigns)
-
-    with open(
-        "report.html",
-        "w",
-        encoding="utf-8",
-    ) as file:
-        file.write(report)
-
-    print(f"{len(lines)} lignes extraites")
-    print(f"{len(campaigns)} campagnes en cours détectées")
-
-    for campaign in campaigns:
-        fiscal = ", ".join(campaign["fiscal"])
-
-        if not fiscal:
-            fiscal = "aucun dispositif fiscal détecté"
-
-        print(
-            f"- {campaign['title']} | "
-            f"{campaign['sector']} | "
-            f"{campaign['amount']} | "
-            f"{fiscal}"
-        )
-
-    print("Fichiers générés :")
-    print("- report.html")
-    print("- sowefund-page.png")
-    print("- sowefund-texte.txt")
+    campaigns = parse_sowefund(sowefund_text) + parse_wiseed(wiseed_text)
+    with open('report.html', 'w', encoding='utf-8') as handle:
+        handle.write(create_report(campaigns))
+    print(f'{len(campaigns)} campagnes détectées')
+    for c in campaigns:
+        print(f"- {c['platform']} | {c['title']} | {c['amount']} | {', '.join(c['tax']) or 'fiscalité à vérifier'}")
+    print('Rapport généré : report.html')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
