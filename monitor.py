@@ -1,47 +1,51 @@
+import feedparser
 from datetime import datetime
 
-today = datetime.now().strftime("%d/%m/%Y")
-
-opportunities = [
-    {
-        "nom": "Exemple IA",
-        "secteur": "IA",
-        "type": "JEIR",
-        "score": 82
-    },
-    {
-        "nom": "Exemple Cyber",
-        "secteur": "Cybersécurité",
-        "type": "JEII",
-        "score": 78
-    }
+RSS_URLS = [
+    "https://news.google.com/rss/search?q=JEIR+startup+France",
+    "https://news.google.com/rss/search?q=JEII+startup+France",
+    "https://news.google.com/rss/search?q=cybersecurity+startup+France",
+    "https://news.google.com/rss/search?q=artificial+intelligence+startup+France"
 ]
+
+items = []
+
+for url in RSS_URLS:
+    feed = feedparser.parse(url)
+
+    for entry in feed.entries[:5]:
+        items.append({
+            "title": entry.title,
+            "link": entry.link
+        })
+
+today = datetime.now().strftime("%d/%m/%Y")
 
 html = f"""
 <html>
 <head>
-    <title>Veille Startup</title>
+<meta charset="utf-8">
+<title>Veille Investissement</title>
 </head>
 <body>
-    <h1>Veille du {today}</h1>
 
-    <h2>Opportunités détectées</h2>
+<h1>Veille investissement - {today}</h1>
 
-    <ul>
+<p>{len(items)} actualités trouvées</p>
+
+<ul>
 """
 
-for opp in opportunities:
+for item in items:
     html += f"""
     <li>
-      <b>{opp['nom']}</b>
-      ({opp['secteur']})
-      - {opp['type']}
-      - score {opp['score']}/100
+        <a href="{item['link']}">{item['title']}</a>
     </li>
     """
 
 html += """
-    </ul>
+</ul>
+
 </body>
 </html>
 """
@@ -49,4 +53,5 @@ html += """
 with open("report.html", "w", encoding="utf-8") as f:
     f.write(html)
 
+print(f"{len(items)} actualités trouvées")
 print("Rapport généré : report.html")
