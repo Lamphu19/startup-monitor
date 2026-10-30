@@ -2,10 +2,11 @@ import feedparser
 from datetime import datetime
 
 RSS_URLS = [
-    "https://news.google.com/rss/search?q=JEIR+startup+France",
-    "https://news.google.com/rss/search?q=JEII+startup+France",
-    "https://news.google.com/rss/search?q=cybersecurity+startup+France",
-    "https://news.google.com/rss/search?q=artificial+intelligence+startup+France"
+    "https://news.google.com/rss/search?q=IR-PME+startup",
+    "https://news.google.com/rss/search?q=crowdfunding+equity+startup+france",
+    "https://news.google.com/rss/search?q=WiSEED",
+    "https://news.google.com/rss/search?q=Sowefund",
+    "https://news.google.com/rss/search?q=JEI+levee+fonds",
 ]
 
 items = []
