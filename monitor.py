@@ -1,24 +1,30 @@
-import feedparser
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime
 
-RSS_URLS = [
-    "https://news.google.com/rss/search?q=IR-PME+startup",
-    "https://news.google.com/rss/search?q=crowdfunding+equity+startup+france",
-    "https://news.google.com/rss/search?q=WiSEED",
-    "https://news.google.com/rss/search?q=Sowefund",
-    "https://news.google.com/rss/search?q=JEI+levee+fonds",
+URL = "https://sowefund.com/investir"
+
+response = requests.get(URL, timeout=30)
+
+html_content = response.text
+
+keywords = [
+    "JEI",
+    "JEIR",
+    "IR",
+    "IA",
+    "CYBER"
 ]
 
-items = []
+matches = []
 
-for url in RSS_URLS:
-    feed = feedparser.parse(url)
+for line in html_content.splitlines():
+    upper_line = line.upper()
 
-    for entry in feed.entries[:5]:
-        items.append({
-            "title": entry.title,
-            "link": entry.link
-        })
+    for keyword in keywords:
+        if keyword in upper_line:
+            matches.append(line.strip())
+            break
 
 today = datetime.now().strftime("%d/%m/%Y")
 
@@ -32,17 +38,13 @@ html = f"""
 
 <h1>Veille investissement - {today}</h1>
 
-<p>{len(items)} actualités trouvées</p>
+<p>{len(matches)} correspondances trouvées</p>
 
 <ul>
 """
 
-for item in items:
-    html += f"""
-    <li>
-        <a href="{item['link']}">{item['title']}</a>
-    </li>
-    """
+for match in matches[:100]:
+    html += f"<li>{match}</li>"
 
 html += """
 </ul>
@@ -54,5 +56,5 @@ html += """
 with open("report.html", "w", encoding="utf-8") as f:
     f.write(html)
 
-print(f"{len(items)} actualités trouvées")
-print("Rapport généré : report.html")
+print(f"{len(matches)} correspondances trouvées")
+print("Rapport généré")
