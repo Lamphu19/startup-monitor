@@ -2,6 +2,7 @@ import re
 from datetime import datetime
 from html import escape
 from playwright.sync_api import sync_playwright
+from pathlib import Path
 
 SOURCES = {
     "Sowefund": "https://sowefund.com/investir",
