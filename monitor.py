@@ -137,16 +137,67 @@ def badges(values, css, fallback='À vérifier'):
     return ''.join(f'<span class="badge {css}">{escape(v)}</span>' for v in values)
 
 
+def filter_tokens(campaign):
+    mapping = {
+        'JEI': 'status-jei', 'JEIC': 'status-jeic', 'JEIR': 'status-jeir', 'JEII': 'status-jeii',
+        'IR-PME': 'reduction-ir-pme', 'IR 2026': 'reduction-ir-2026',
+        'PEA': 'envelope-pea', 'PEA-PME': 'envelope-pea-pme',
+        '150-0 B ter': 'envelope-150', 'Apport-cession': 'envelope-apport',
+    }
+    result = []
+    for value in campaign['status'] + campaign['reduction'] + campaign['envelope']:
+        if value in mapping:
+            result.append(mapping[value])
+        if value.startswith('Réduction IR '):
+            result.append('reduction-ir-rate')
+    if not campaign['status']: result.append('status-unknown')
+    if not campaign['reduction']: result.append('reduction-unknown')
+    if not campaign['envelope']: result.append('envelope-unknown')
+    return ' '.join(dict.fromkeys(result))
+
+
 def create_report(items):
     sections = []
     for platform in SOURCES:
         cards = []
-        for x in [v for v in items if v['platform'] == platform]:
-            cards.append(f'''<article class="card"><h3>{escape(x['title'])}</h3><p>{escape(x['description'])}</p>
-<div class="cats"><div><small>Statut entreprise</small>{badges(x['status'],'status')}</div><div><small>Réduction</small>{badges(x['reduction'],'reduction')}</div><div><small>Enveloppe</small>{badges(x['envelope'],'envelope')}</div></div>
-<p><b>Type :</b> {escape(x['product'])} | <b>Statut :</b> {escape(x['state'])} | <b>Montant/ticket :</b> {escape(x['amount'])}</p><a href="{escape(x['url'])}">Voir sur {platform}</a></article>''')
-        sections.append(f'<section><h2>{platform} ({len(cards)})</h2>{"".join(cards) or "<p>Aucun projet public détecté.</p>"}</section>')
-    return f'''<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Veille investissement</title><style>body{{margin:0;background:#f3f6f9;font:15px Arial;color:#17202a}}main{{max-width:1050px;margin:auto;padding:28px}}header{{background:#053f52;color:white;padding:26px;border-radius:14px}}.card{{background:white;border-left:5px solid #00af8a;border-radius:10px;padding:20px;margin:15px 0;box-shadow:0 3px 12px #0001}}h2,h3{{color:#053f52}}.cats{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}.cats>div{{background:#f5f8fa;padding:10px;border-radius:8px}}small{{display:block}}.badge{{display:inline-block;padding:6px 9px;margin:4px;border-radius:14px;font-size:12px;font-weight:bold}}.status{{background:#315b7d;color:white}}.reduction{{background:#087f5b;color:white}}.envelope{{background:#e4ebf5}}.unknown{{background:#fff3cd}}@media(max-width:700px){{.cats{{grid-template-columns:1fr}}}}</style><body><main><header><h1>Veille des investissements innovants</h1><p>{datetime.now().strftime('%d/%m/%Y à %H:%M')} - {len(items)} dossier(s) sur 5 plateformes</p></header>{''.join(sections)}<footer>Vérifier la documentation fiscale et le type de titre avant toute souscription.</footer></main></body></html>'''
+        platform_items = [value for value in items if value['platform'] == platform]
+        for campaign in platform_items:
+            cards.append(f'''<article class="card" data-filters="{filter_tokens(campaign)}">
+<h3>{escape(campaign['title'])}</h3><p>{escape(campaign['description'])}</p>
+<div class="cats">
+<div><small>Statut de l'entreprise</small>{badges(campaign['status'],'status')}</div>
+<div><small>Réduction d'impôt</small>{badges(campaign['reduction'],'reduction')}</div>
+<div><small>Enveloppe / mécanisme</small>{badges(campaign['envelope'],'envelope')}</div>
+</div>
+<p><b>Type :</b> {escape(campaign['product'])} | <b>Statut :</b> {escape(campaign['state'])} | <b>Montant/ticket :</b> {escape(campaign['amount'])}</p>
+<a href="{escape(campaign['url'])}" target="_blank" rel="noopener">Voir sur {platform}</a>
+</article>''')
+        content = ''.join(cards) or '<p>Aucun projet public détecté.</p>'
+        sections.append(f'<section><h2>{platform} ({len(cards)})</h2>{content}</section>')
+
+    now = datetime.now().strftime('%d/%m/%Y à %H:%M')
+    return f'''<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Veille des investissements innovants</title><style>
+body{{margin:0;background:#f3f6f9;font:15px Arial;color:#17202a}}main{{max-width:1050px;margin:auto;padding:28px}}
+header{{background:#053f52;color:white;padding:26px;border-radius:14px}}.panel,.card{{background:white;border-radius:10px;padding:20px;margin:18px 0;box-shadow:0 3px 12px #0001}}.card{{border-left:5px solid #00af8a}}
+h2,h3{{color:#053f52}}.group{{margin:12px 0}}.group strong{{display:block;margin-bottom:6px}}
+button{{padding:8px 12px;margin:3px;border:1px solid #b8c7d1;border-radius:18px;background:white;cursor:pointer}}button.active{{background:#087f5b;color:white;border-color:#087f5b}}
+.cats{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}.cats>div{{background:#f5f8fa;padding:10px;border-radius:8px}}small{{display:block}}
+.badge{{display:inline-block;padding:6px 9px;margin:4px;border-radius:14px;font-size:12px;font-weight:bold}}.status{{background:#315b7d;color:white}}.reduction{{background:#087f5b;color:white}}.envelope{{background:#e4ebf5}}.unknown{{background:#fff3cd}}
+.hidden{{display:none}}#count{{font-weight:bold;color:#49616d}}@media(max-width:700px){{.cats{{grid-template-columns:1fr}}}}</style></head><body><main>
+<header><h1>Veille des investissements innovants</h1><p>{now} - {len(items)} dossier(s) sur 5 plateformes</p></header>
+<div class="panel">
+<div class="group"><strong>Statut de l'entreprise</strong><button data-filter="status-jeir">JEIR</button><button data-filter="status-jeii">JEII</button><button data-filter="status-jeic">JEIC</button><button data-filter="status-jei">JEI</button><button data-filter="status-unknown">À vérifier</button></div>
+<div class="group"><strong>Réduction d'impôt</strong><button data-filter="reduction-ir-pme">IR-PME</button><button data-filter="reduction-ir-2026">IR 2026</button><button data-filter="reduction-ir-rate">Taux IR publié</button><button data-filter="reduction-unknown">À vérifier</button></div>
+<div class="group"><strong>Enveloppe / mécanisme</strong><button data-filter="envelope-pea">PEA</button><button data-filter="envelope-pea-pme">PEA-PME</button><button data-filter="envelope-150">150-0 B ter</button><button data-filter="envelope-apport">Apport-cession</button><button data-filter="envelope-unknown">À vérifier</button></div>
+<button id="reset" class="active">Tous les dossiers</button><p id="count"></p></div>
+{''.join(sections)}<footer>Vérifier la documentation fiscale et le type de titre avant toute souscription.</footer></main>
+<script>
+const buttons=document.querySelectorAll('button[data-filter]'),cards=document.querySelectorAll('.card'),active=new Set(),count=document.getElementById('count'),reset=document.getElementById('reset');
+function applyFilters(){{let visible=0;cards.forEach(card=>{{const tags=card.dataset.filters.split(' ').filter(Boolean);const show=[...active].every(filter=>tags.includes(filter));card.style.display=show?'block':'none';if(show)visible++;}});document.querySelectorAll('section').forEach(section=>{{const anyVisible=[...section.querySelectorAll('.card')].some(card=>card.style.display!=='none');section.classList.toggle('hidden',!anyVisible);}});count.textContent=visible+' dossier(s) affiché(s)';reset.classList.toggle('active',active.size===0);}}
+buttons.forEach(button=>button.addEventListener('click',()=>{{const filter=button.dataset.filter;if(active.has(filter))active.delete(filter);else active.add(filter);button.classList.toggle('active');applyFilters();}}));
+reset.addEventListener('click',()=>{{active.clear();buttons.forEach(button=>button.classList.remove('active'));applyFilters();}});applyFilters();
+</script></body></html>'''
 
 
 def main():
