@@ -29,7 +29,13 @@ jobs:
       - name: Générer le rapport
         run: python monitor.py
 
-      - name: Publier le rapport et les fichiers de diagnostic
+      - name: Vérifier le rapport
+        run: |
+          test -s report.html
+          echo "Le rapport HTML existe et n'est pas vide."
+          ls -lh report.html
+
+      - name: Publier le rapport et les diagnostics
         uses: actions/upload-artifact@v4
         with:
           name: startup-report
@@ -39,3 +45,32 @@ jobs:
             *-texte.txt
           if-no-files-found: error
           retention-days: 30
+
+      - name: Envoyer le rapport par e-mail
+        uses: dawidd6/action-send-mail@v6
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "Veille investissements innovants - rapport quotidien"
+          to: ${{ secrets.MAIL_TO }}
+          from: "Startup Monitor <${{ secrets.MAIL_USERNAME }}>"
+          body: |
+            Bonjour,
+
+            Le rapport de veille des investissements innovants est joint à ce message.
+
+            Plateformes analysées :
+            - Sowefund
+            - WiSEED
+            - Lita
+            - Tudigo
+            - Crowdcube
+
+            Télécharge le fichier report.html et ouvre-le dans un navigateur
+            pour utiliser les filtres fiscaux interactifs.
+
+            Ce rapport est généré automatiquement par GitHub Actions.
+          attachments: report.html
