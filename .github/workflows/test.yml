@@ -3,37 +3,39 @@ name: Startup Monitor
 on:
   workflow_dispatch:
 
+  schedule:
+    - cron: "15 7 * * *"
+
 jobs:
   monitor:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Download repository
+      - name: Télécharger le dépôt
         uses: actions/checkout@v4
 
-      - name: Install Python
+      - name: Installer Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install Python dependencies
+      - name: Installer les dépendances Python
         run: pip install -r requirements.txt
 
-      - name: Install Chromium
+      - name: Installer Chromium
         run: playwright install --with-deps chromium
 
-      - name: Run startup monitor
+      - name: Générer le rapport
         run: python monitor.py
 
-      - name: Upload report
+      - name: Publier le rapport et les fichiers de diagnostic
         uses: actions/upload-artifact@v4
         with:
           name: startup-report
           path: |
             report.html
-            sowefund-page.png
-            sowefund-texte.txt
-            wiseed-page.png
-            wiseed-texte.txt
+            *-page.png
+            *-texte.txt
+          if-no-files-found: error
           retention-days: 30
