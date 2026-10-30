@@ -34,4 +34,6 @@ jobs:
             report.html
             sowefund-page.png
             sowefund-texte.txt
+            wiseed-page.png
+            wiseed-texte.txt
           retention-days: 30
