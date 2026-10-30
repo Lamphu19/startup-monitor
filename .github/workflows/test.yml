@@ -8,20 +8,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Download repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Install Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+          cache: "pip"
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Run monitor
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run startup monitor
         run: python monitor.py
 
       - name: Upload report
         uses: actions/upload-artifact@v4
         with:
           name: startup-report
-          path: report.html
+          path: |
+            report.html
+            sowefund-page.png
+            sowefund-texte.txt
+          retention-days: 30
